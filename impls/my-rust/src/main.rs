@@ -1,19 +1,30 @@
+pub mod printer;
+pub mod reader;
+
 use std::io::Write;
 
-fn rep(input: &str) -> &str {
-    PRINT(EVAL(READ(input)))
+use reader::{MalErr, MalForm};
+
+fn rep(input: String) -> String {
+    match READ(input) {
+        Ok(form) => match EVAL(form) {
+            Ok(result) => PRINT(result),
+            Err(err) => err,
+        },
+        Err(err) => err,
+    }
 }
 
-fn PRINT(input: &str) -> &str {
-    input
+fn READ(input: String) -> Result<MalForm, MalErr> {
+    reader::read_str(input)
 }
 
-fn EVAL(input: &str) -> &str {
-    input
+fn EVAL(input: MalForm) -> Result<MalForm, MalErr> {
+    Ok(input)
 }
 
-fn READ(input: &str) -> &str {
-    input
+fn PRINT(input: MalForm) -> String {
+    printer::pr_str(&input)
 }
 
 fn main() {
@@ -30,6 +41,6 @@ fn main() {
             break;
         }
         input.pop();
-        println!("{}", rep(&input));
+        println!("{}", rep(input));
     }
 }
