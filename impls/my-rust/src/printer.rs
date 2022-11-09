@@ -1,19 +1,21 @@
 use crate::reader::MalForm;
 
 pub fn pr_str(form: &MalForm) -> String {
+    fn pr_seq(v: &Vec<MalForm>) -> String {
+        v.iter()
+            .map(|x| pr_str(x))
+            .collect::<Vec<String>>()
+            .join(" ")
+    }
     match form {
-        MalForm::List(v) => format!(
-            "({})",
-            v.iter()
-                .map(|x| pr_str(x))
-                .collect::<Vec<String>>()
-                .join(" ")
-        ),
+        MalForm::List(v) => format!("({})", pr_seq(&v)),
+        MalForm::Vector(v) => format!("[{}]", pr_seq(&v)),
         MalForm::Bool(b) => String::from(if *b == true { "true" } else { "false" }),
         MalForm::Int(n) => n.to_string(),
         MalForm::Nil => String::from("nil"),
         MalForm::Symbol(s) => s.clone(),
         MalForm::String(s) => format!(r#""{s}""#),
+        MalForm::Function(_) => "<function>".into(),
     }
 }
 

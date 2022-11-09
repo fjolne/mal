@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use regex::Regex;
 
 struct Reader {
@@ -37,43 +39,79 @@ pub fn read_str(text: String) -> Result<MalForm, MalErr> {
     })
 }
 
-#[derive(Debug, PartialEq)]
+type MalFunction = dyn Fn(Vec<MalForm>) -> MalForm;
+
+#[derive(Clone)]
 pub enum MalForm {
     List(Vec<MalForm>),
+    Vector(Vec<MalForm>),
     Int(i64),
     Nil,
     Bool(bool),
     Symbol(String),
     String(String),
+    Function(Rc<MalFunction>),
+}
+
+impl std::fmt::Debug for MalForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
+            Self::Vector(arg0) => f.debug_tuple("Vector").field(arg0).finish(),
+            Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
+            Self::Nil => write!(f, "Nil"),
+            Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
+            Self::Symbol(arg0) => f.debug_tuple("Symbol").field(arg0).finish(),
+            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
+            Self::Function(_arg0) => f.debug_tuple("Function").field(&"f").finish(),
+        }
+    }
+}
+
+impl PartialEq for MalForm {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::List(l0), Self::List(r0)) => l0 == r0,
+            (Self::Vector(l0), Self::Vector(r0)) => l0 == r0,
+            (Self::Int(l0), Self::Int(r0)) => l0 == r0,
+            (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
+            (Self::Symbol(l0), Self::Symbol(r0)) => l0 == r0,
+            (Self::String(l0), Self::String(r0)) => l0 == r0,
+            (Self::Function(_l0), Self::Function(_r0)) => false,
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
 }
 
 fn read_form(r: &mut Reader) -> Result<MalForm, MalErr> {
     if r.eof() {
         Err(String::from("Unexpected end of input!"))
     } else if r.peek() == "(" {
-        read_list(r)
+        Ok(MalForm::List(read_list(r, ")")?))
+    } else if r.peek() == "[" {
+        Ok(MalForm::Vector(read_list(r, "]")?))
     } else {
         read_atom(r)
     }
 }
 
-fn read_list(r: &mut Reader) -> Result<MalForm, MalErr> {
+fn read_list(r: &mut Reader, end_token: &str) -> Result<Vec<MalForm>, MalErr> {
     let mut v: Vec<MalForm> = vec![];
     r.next();
-    while !r.eof() && r.peek() != ")" {
+    while !r.eof() && r.peek() != end_token {
         v.push(read_form(r)?)
     }
     if r.eof() {
         return Err(String::from("unbalanced"));
     }
     r.next();
-    Ok(MalForm::List(v))
+    Ok(v)
 }
 
 fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
     let t = r.next();
-    let c = t.chars().next().unwrap();
-    if c.is_numeric() {
+    let c = t.chars().nth(0).unwrap();
+    if Regex::new(r"^[+-]?\d+$").unwrap().is_match(t) {
         Ok(MalForm::Int(t.parse::<i64>().unwrap()))
     } else if c.is_alphabetic() || "+-*/".contains(c) {
         Ok(match t {
