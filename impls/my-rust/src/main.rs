@@ -1,19 +1,19 @@
+pub mod env;
 pub mod printer;
 pub mod reader;
 use std::{collections::HashMap, io::Write, rc::Rc};
 
+use env::Env;
 use reader::{MalErr, MalForm};
 
-type ReplEnv = HashMap<String, MalForm>;
-
-fn eval_ast(form: &MalForm, env: &ReplEnv) -> Result<MalForm, MalErr> {
-    let eval_seq = |v: &Vec<MalForm>| -> Result<Vec<MalForm>, MalErr> {
+fn eval_ast(form: &MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
+    let mut eval_seq = |v: &Vec<MalForm>| -> Result<Vec<MalForm>, MalErr> {
         v.iter()
             .map(|form| EVAL(form.clone(), env))
             .collect::<Result<Vec<MalForm>, MalErr>>()
     };
     match form {
-        MalForm::Symbol(s) => env.get(s).cloned().ok_or(format!("symbol not found: {s}")),
+        MalForm::Symbol(s) => env.get(s).cloned().ok_or(format!("symbol '{s}' not found")),
         MalForm::List(v) => Ok(MalForm::List(eval_seq(v)?)),
         MalForm::Vector(v) => Ok(MalForm::Vector(eval_seq(v)?)),
         MalForm::Map(m) => Ok(MalForm::Map(
@@ -25,7 +25,7 @@ fn eval_ast(form: &MalForm, env: &ReplEnv) -> Result<MalForm, MalErr> {
     }
 }
 
-fn rep(input: String, env: &ReplEnv) -> Result<String, MalErr> {
+fn rep(input: String, env: &mut Env) -> Result<String, MalErr> {
     PRINT(EVAL(READ(input)?, env)?)
 }
 
@@ -35,18 +35,57 @@ fn READ(input: String) -> Result<MalForm, MalErr> {
 }
 
 #[allow(non_snake_case)]
-fn EVAL(form: MalForm, env: &ReplEnv) -> Result<MalForm, MalErr> {
-    let form = eval_ast(&form, env)?;
+fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
     let MalForm::List(ref v) = form else {
-        return Ok(form);
+        return eval_ast(&form, env);
     };
-    if v.is_empty() {
-        return Ok(form);
+    match &v[..] {
+        [] => Ok(form),
+        [MalForm::Symbol(symbol), args @ ..] => match symbol.as_str() {
+            "def!" => {
+                let [name, value] = args else {
+                    return Err("wrong number of args to def!".to_owned());
+                };
+                let MalForm::Symbol(name) = name else {
+                    return Err("not a symbol".to_owned());
+                };
+                let value = EVAL(value.clone(), env)?;
+                Ok(env.set(name, value).clone())
+            }
+            "let*" => {
+                let [MalForm::List(bindings) | MalForm::Vector(bindings), body @ ..] = args else {
+                    return Err("let form must have a list as a 2nd arg".to_owned());
+                };
+                let mut let_env = Env::new();
+                let_env.outer = Some(env);
+                for kv in bindings.chunks(2) {
+                    let [k, v] = kv else {
+                        panic!();
+                    };
+                    let MalForm::Symbol(k) = k else {
+                        return Err("odd left bindings should be symbols".to_owned());
+                    };
+                    let v = EVAL(v.clone(), &mut let_env)?;
+                    let_env.set(k, v);
+                }
+                let body_list = MalForm::List(body.to_owned());
+                let MalForm::List(xs) = eval_ast(&body_list, &mut let_env)? else {
+                    panic!();
+                };
+                Ok(xs.last().cloned().unwrap_or(MalForm::Nil))
+            }
+            _ => {
+                let MalForm::List(ref v) = eval_ast(&form, env)? else {
+                    panic!();
+                };
+                let [MalForm::Function(f_ptr), args @ ..] = &v[..] else {
+                    return Err("head of a list is neither a function, nor a special form".to_string());
+                };
+                Ok((*f_ptr)(args.to_vec()))
+            }
+        },
+        _ => Err("head of a list is not a symbol".to_owned()),
     }
-    let [MalForm::Function(f_ptr), args @ ..] = &v[..] else {
-        return Err("head of a list is not a function".to_string());
-    };
-    Ok((*f_ptr)(args.to_vec()))
 }
 
 #[allow(non_snake_case)]
@@ -71,7 +110,7 @@ where
     }))
 }
 
-fn new_repl_env() -> ReplEnv {
+fn default_env() -> Env<'static> {
     HashMap::from([
         (
             "+".to_string(),
@@ -90,10 +129,11 @@ fn new_repl_env() -> ReplEnv {
             new_arithmetic_fn(|xs| xs.into_iter().reduce(|a, b| a / b).unwrap()),
         ),
     ])
+    .into()
 }
 
 fn main() -> Result<(), MalErr> {
-    let repl_env = new_repl_env();
+    let mut repl_env = default_env();
 
     loop {
         print!("user> ");
@@ -108,7 +148,7 @@ fn main() -> Result<(), MalErr> {
             break;
         }
         input.pop();
-        match rep(input, &repl_env) {
+        match rep(input, &mut repl_env) {
             Ok(result) => println!("{}", result),
             Err(err) => println!("error: {}", err),
         }
@@ -123,9 +163,9 @@ mod tests {
 
     #[test]
     fn eval_test() -> Result<(), MalErr> {
-        let repl_env = new_repl_env();
+        let mut repl_env = default_env();
         assert_eq!(
-            EVAL(READ("(+ 1 (* 2 3) (/ 7 3) (- 4 1))".into())?, &repl_env)?,
+            EVAL(READ("(+ 1 (* 2 3) (/ 7 3) (- 4 1))".into())?, &mut repl_env)?,
             MalForm::Int(12)
         );
         Ok(())
