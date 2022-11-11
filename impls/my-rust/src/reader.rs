@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::HashMap, rc::Rc};
 
 use regex::Regex;
 
@@ -45,11 +45,14 @@ type MalFunction = dyn Fn(Vec<MalForm>) -> MalForm;
 pub enum MalForm {
     List(Vec<MalForm>),
     Vector(Vec<MalForm>),
-    Int(i64),
+    Map(HashMap<String, MalForm>),
+
     Nil,
     Bool(bool),
+    Int(i64),
     Symbol(String),
     String(String),
+
     Function(Rc<MalFunction>),
 }
 
@@ -58,6 +61,7 @@ impl std::fmt::Debug for MalForm {
         match self {
             Self::List(arg0) => f.debug_tuple("List").field(arg0).finish(),
             Self::Vector(arg0) => f.debug_tuple("Vector").field(arg0).finish(),
+            Self::Map(arg0) => f.debug_tuple("Map").field(arg0).finish(),
             Self::Int(arg0) => f.debug_tuple("Int").field(arg0).finish(),
             Self::Nil => write!(f, "Nil"),
             Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
@@ -73,6 +77,7 @@ impl PartialEq for MalForm {
         match (self, other) {
             (Self::List(l0), Self::List(r0)) => l0 == r0,
             (Self::Vector(l0), Self::Vector(r0)) => l0 == r0,
+            (Self::Map(l0), Self::Map(r0)) => l0 == r0,
             (Self::Int(l0), Self::Int(r0)) => l0 == r0,
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Symbol(l0), Self::Symbol(r0)) => l0 == r0,
@@ -90,6 +95,25 @@ fn read_form(r: &mut Reader) -> Result<MalForm, MalErr> {
         Ok(MalForm::List(read_list(r, ")")?))
     } else if r.peek() == "[" {
         Ok(MalForm::Vector(read_list(r, "]")?))
+    } else if r.peek() == "{" {
+        let xs = read_list(r, "}")?;
+        if xs.len() % 2 != 0 {
+            return Err("odd number of map forms".to_string());
+        }
+        let kvs: Result<HashMap<String, MalForm>, MalErr> = xs
+            .chunks(2)
+            .map(|kv| {
+                let [k, v] = kv else { panic!("this should never have happened"); };
+                Ok((
+                    match k {
+                        MalForm::String(s) => s.clone(),
+                        _ => return Err("map key should be a string or a keyword".to_string()),
+                    },
+                    v.clone(),
+                ))
+            })
+            .collect();
+        Ok(MalForm::Map(kvs?))
     } else {
         read_atom(r)
     }
@@ -126,8 +150,32 @@ fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
         } else {
             Err(String::from("unbalanced"))
         }
+    } else if c == ':' {
+        if t.len() > 1 {
+            Ok(MalForm::String(new_keyword(&t[1..])))
+        } else {
+            Err(String::from("keyword cannot be empty"))
+        }
     } else {
         Err(format!("unknown token: {t}"))
+    }
+}
+
+const KEYWORD_SPECIFIER: char = '\u{29E}';
+
+fn new_keyword(s: &str) -> String {
+    format!("{}{}", KEYWORD_SPECIFIER, s)
+}
+
+pub fn is_keyword_str(s: &str) -> bool {
+    s.len() > 1 && s.chars().next().unwrap() == KEYWORD_SPECIFIER
+}
+
+fn is_keyword(form: &MalForm) -> bool {
+    if let MalForm::String(s) = form {
+        is_keyword_str(s)
+    } else {
+        false
     }
 }
 
@@ -175,6 +223,45 @@ mod tests {
                     MalForm::Int(36)
                 ])
             ])),
+        );
+    }
+
+    #[test]
+    fn keyword_test() {
+        let kw = read_str(":okay".to_string());
+        assert_eq!(
+            kw,
+            Ok(MalForm::String(format!("{}okay", KEYWORD_SPECIFIER)))
+        );
+        assert!(is_keyword(&kw.unwrap()));
+        let nkw = read_str(r#""okay""#.to_string());
+        assert_eq!(nkw, Ok(MalForm::String("okay".to_string())));
+        assert!(!is_keyword(&nkw.unwrap()));
+    }
+
+    #[test]
+    fn map_test() {
+        assert_eq!(read_str("{}".to_string()), Ok(MalForm::Map(HashMap::new())));
+        assert_eq!(
+            read_str(r#"{ "a" 1 }"#.to_string()),
+            Ok(MalForm::Map(HashMap::from([(
+                "a".to_string(),
+                MalForm::Int(1)
+            )])))
+        );
+        assert_eq!(
+            read_str(r#"{ :a 1 }"#.to_string()),
+            Ok(MalForm::Map(HashMap::from([(
+                new_keyword("a"),
+                MalForm::Int(1)
+            )])))
+        );
+        assert_eq!(
+            read_str(r#"{ "a" 1 :a 2 }"#.to_string()),
+            Ok(MalForm::Map(HashMap::from([
+                ("a".to_string(), MalForm::Int(1)),
+                (new_keyword("a"), MalForm::Int(2))
+            ])))
         );
     }
 }
