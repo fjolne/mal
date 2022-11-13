@@ -4,7 +4,7 @@ pub mod reader;
 use std::{collections::HashMap, io::Write, rc::Rc};
 
 use env::Env;
-use reader::{MalErr, MalForm};
+use reader::*;
 
 fn eval_ast(form: &MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
     let mut eval_seq = |v: &Vec<MalForm>| -> Result<Vec<MalForm>, MalErr> {
@@ -25,6 +25,20 @@ fn eval_ast(form: &MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
     }
 }
 
+impl Invoke for MalFn {
+    fn invoke(&self, args: Vec<MalForm>) -> Result<MalForm, MalErr> {
+        let mut let_body = vec![MalForm::Symbol("let*".to_owned())];
+        let mut bindings = vec![];
+        for (i, p) in self.params.iter().enumerate() {
+            bindings.push(MalForm::Symbol(p.clone()));
+            bindings.push(args[i].clone());
+        }
+        let_body.push(MalForm::List(bindings));
+        let_body.push((*self.body).clone());
+        EVAL(MalForm::List(let_body), &mut default_env())
+    }
+}
+
 fn rep(input: String, env: &mut Env) -> Result<String, MalErr> {
     PRINT(EVAL(READ(input)?, env)?)
 }
@@ -39,9 +53,52 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
     let MalForm::List(ref v) = form else {
         return eval_ast(&form, env);
     };
+
+    fn eval_default(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
+        let MalForm::List(ref v) = eval_ast(&form, env)? else {
+            panic!();
+        };
+        let [head, args @ ..] = &v[..] else {
+            panic!();
+        };
+        match head {
+            MalForm::FnSpecial(invokable) => invokable.invoke(args.to_vec()),
+            MalForm::Fn(invokable) => invokable.invoke(args.to_vec()),
+            _ => Err("head of a list is not invokable".to_owned()),
+        }
+    }
+
     match &v[..] {
         [] => Ok(form),
         [MalForm::Symbol(symbol), args @ ..] => match symbol.as_str() {
+            "do" => {
+                let MalForm::List (args) = eval_ast(&MalForm::List(args.to_owned()), env)? else {
+                    panic!();
+                };
+                Ok(args.last().cloned().unwrap_or(MalForm::Nil))
+            }
+            "fn*" => {
+                let [MalForm::List(params) | MalForm::Vector(params), body @ ..] = args else {
+                    return Err("fn* form must have a seq as 2nd arg".to_owned());
+                };
+                let params = params
+                    .into_iter()
+                    .map(|x| {
+                        if let MalForm::Symbol(s) = x {
+                            Ok(s.to_owned())
+                        } else {
+                            Err("fn parameter must be a symbol".to_owned())
+                        }
+                    })
+                    .collect::<Result<Vec<String>, MalErr>>()?;
+                let mut do_body_vec = vec![MalForm::Symbol("do".to_owned())];
+                do_body_vec.append(&mut body.to_owned());
+                let do_body = MalForm::List(do_body_vec);
+                Ok(MalForm::Fn(MalFn {
+                    params,
+                    body: Box::new(do_body),
+                }))
+            }
             "def!" => {
                 let [name, value] = args else {
                     return Err("wrong number of args to def!".to_owned());
@@ -54,7 +111,7 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
             }
             "let*" => {
                 let [MalForm::List(bindings) | MalForm::Vector(bindings), body @ ..] = args else {
-                    return Err("let form must have a list as a 2nd arg".to_owned());
+                    return Err("let form must have a seq as 2nd arg".to_owned());
                 };
                 let mut let_env = Env::new();
                 let_env.outer = Some(env);
@@ -74,17 +131,9 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
                 };
                 Ok(xs.last().cloned().unwrap_or(MalForm::Nil))
             }
-            _ => {
-                let MalForm::List(ref v) = eval_ast(&form, env)? else {
-                    panic!();
-                };
-                let [MalForm::Function(f_ptr), args @ ..] = &v[..] else {
-                    return Err("head of a list is neither a function, nor a special form".to_string());
-                };
-                Ok((*f_ptr)(args.to_vec()))
-            }
+            _ => eval_default(form, env),
         },
-        _ => Err("head of a list is not a symbol".to_owned()),
+        _ => eval_default(form, env),
     }
 }
 
@@ -97,17 +146,19 @@ fn new_arithmetic_fn<F>(f: F) -> MalForm
 where
     F: Fn(Vec<i64>) -> i64 + 'static,
 {
-    MalForm::Function(Rc::new(move |args: Vec<MalForm>| -> MalForm {
-        MalForm::Int(f(args
-            .iter()
-            .map(|x| {
-                let MalForm::Int(n) = x else {
-                    panic!("not a number");
-                };
-                *n
-            })
-            .collect::<Vec<i64>>()))
-    }))
+    MalForm::FnSpecial(MalFnSpecial::new(Rc::new(
+        move |args: Vec<MalForm>| -> MalForm {
+            MalForm::Int(f(args
+                .iter()
+                .map(|x| {
+                    let MalForm::Int(n) = x else {
+                               panic!("not a number");
+                           };
+                    *n
+                })
+                .collect::<Vec<i64>>()))
+        },
+    )))
 }
 
 fn default_env() -> Env<'static> {

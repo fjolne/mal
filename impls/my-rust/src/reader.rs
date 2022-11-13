@@ -1,5 +1,6 @@
 use std::{collections::HashMap, rc::Rc};
 
+use crate::env::Env;
 use regex::Regex;
 
 struct Reader {
@@ -39,7 +40,35 @@ pub fn read_str(text: String) -> Result<MalForm, MalErr> {
     })
 }
 
+pub trait Invoke {
+    fn invoke(&self, args: Vec<MalForm>) -> Result<MalForm, MalErr>;
+}
+
+#[derive(Clone)]
+pub struct MalFn {
+    // pub env: Box<Env<'a>>,
+    pub params: Vec<String>,
+    pub body: Box<MalForm>,
+}
+
 type MalFunction = dyn Fn(Vec<MalForm>) -> MalForm;
+
+#[derive(Clone)]
+pub struct MalFnSpecial {
+    pub f: Rc<MalFunction>,
+}
+
+impl MalFnSpecial {
+    pub fn new(f: Rc<MalFunction>) -> Self {
+        MalFnSpecial { f }
+    }
+}
+
+impl Invoke for MalFnSpecial {
+    fn invoke(&self, args: Vec<MalForm>) -> Result<MalForm, MalErr> {
+        Ok((*self.f)(args.to_vec()))
+    }
+}
 
 #[derive(Clone)]
 pub enum MalForm {
@@ -53,7 +82,8 @@ pub enum MalForm {
     Symbol(String),
     String(String),
 
-    Function(Rc<MalFunction>),
+    Fn(MalFn),
+    FnSpecial(MalFnSpecial),
 }
 
 impl std::fmt::Debug for MalForm {
@@ -67,7 +97,8 @@ impl std::fmt::Debug for MalForm {
             Self::Bool(arg0) => f.debug_tuple("Bool").field(arg0).finish(),
             Self::Symbol(arg0) => f.debug_tuple("Symbol").field(arg0).finish(),
             Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
-            Self::Function(_arg0) => f.debug_tuple("Function").field(&"f").finish(),
+            Self::Fn(_arg0) => f.debug_tuple("Fn").field(&"f").finish(),
+            Self::FnSpecial(_arg0) => f.debug_tuple("FnSpecial").field(&"f").finish(),
         }
     }
 }
@@ -82,7 +113,8 @@ impl PartialEq for MalForm {
             (Self::Bool(l0), Self::Bool(r0)) => l0 == r0,
             (Self::Symbol(l0), Self::Symbol(r0)) => l0 == r0,
             (Self::String(l0), Self::String(r0)) => l0 == r0,
-            (Self::Function(_l0), Self::Function(_r0)) => false,
+            (Self::Fn(_l0), Self::Fn(_r0)) => false,
+            (Self::FnSpecial(_l0), Self::FnSpecial(_r0)) => false,
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),
         }
     }
