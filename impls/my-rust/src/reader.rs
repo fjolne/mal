@@ -169,7 +169,7 @@ fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
     let c = t.chars().nth(0).unwrap();
     if Regex::new(r"^[+-]?\d+$").unwrap().is_match(t) {
         Ok(MalForm::Int(t.parse::<i64>().unwrap()))
-    } else if c.is_alphabetic() || "+-*/".contains(c) {
+    } else if c.is_alphabetic() || "+-*/=".contains(c) {
         Ok(match t {
             "nil" => MalForm::Nil,
             "true" => MalForm::Bool(true),

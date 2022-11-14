@@ -1,7 +1,7 @@
 pub mod env;
 pub mod printer;
 pub mod reader;
-use std::{collections::HashMap, io::Write, rc::Rc};
+use std::{any::Any, collections::HashMap, io::Write, rc::Rc};
 
 use env::Env;
 use reader::*;
@@ -67,7 +67,12 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
             _ => Err("head of a list is not invokable".to_owned()),
         }
     }
-
+    fn wrap_do(body: &[MalForm]) -> MalForm {
+        let mut do_body_vec = vec![MalForm::Symbol("do".to_owned())];
+        do_body_vec.append(&mut body.to_owned());
+        let do_body = MalForm::List(do_body_vec);
+        do_body
+    }
     match &v[..] {
         [] => Ok(form),
         [MalForm::Symbol(symbol), args @ ..] => match symbol.as_str() {
@@ -91,13 +96,26 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
                         }
                     })
                     .collect::<Result<Vec<String>, MalErr>>()?;
-                let mut do_body_vec = vec![MalForm::Symbol("do".to_owned())];
-                do_body_vec.append(&mut body.to_owned());
-                let do_body = MalForm::List(do_body_vec);
                 Ok(MalForm::Fn(MalFn {
                     params,
-                    body: Box::new(do_body),
+                    body: Box::new(wrap_do(body)),
                 }))
+            }
+            "if" => {
+                let [cond_expr, true_statement, false_statements @ ..] = args else {
+                    return Err("'if' should have at least 2 args".to_owned());
+                };
+                let MalForm::Bool(cond_expr) = EVAL(cond_expr.clone(), env)? else {
+                    return Err("'if' cond_expr should evaluate to bool".to_owned());
+                };
+                EVAL(
+                    if cond_expr {
+                        true_statement.clone()
+                    } else {
+                        wrap_do(false_statements)
+                    },
+                    env,
+                )
             }
             "def!" => {
                 let [name, value] = args else {
@@ -161,6 +179,22 @@ where
     )))
 }
 
+fn cmp(a: &MalForm, b: &MalForm) -> i64 {
+    match (a, b) {
+        (MalForm::Int(x), MalForm::Int(y)) => x - y,
+        _ => -1,
+    }
+}
+
+fn new_cmp_fn<G>(cmp_cond: G) -> MalForm
+where
+    G: Fn(i64) -> bool + 'static,
+{
+    MalForm::FnSpecial(MalFnSpecial::new(Rc::new(
+        move |args: Vec<MalForm>| -> MalForm { MalForm::Bool(cmp_cond(cmp(&args[0], &args[1]))) },
+    )))
+}
+
 fn default_env() -> Env<'static> {
     HashMap::from([
         (
@@ -179,6 +213,11 @@ fn default_env() -> Env<'static> {
             "/".to_string(),
             new_arithmetic_fn(|xs| xs.into_iter().reduce(|a, b| a / b).unwrap()),
         ),
+        ("=".to_string(), new_cmp_fn(|x| x == 0)),
+        ("<".to_string(), new_cmp_fn(|x| x < 0)),
+        ("<=".to_string(), new_cmp_fn(|x| x <= 0)),
+        (">".to_string(), new_cmp_fn(|x| x > 0)),
+        (">=".to_string(), new_cmp_fn(|x| x >= 0)),
     ])
     .into()
 }
