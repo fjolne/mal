@@ -1,7 +1,7 @@
 pub mod env;
 pub mod printer;
 pub mod reader;
-use std::{any::Any, collections::HashMap, io::Write, rc::Rc};
+use std::{collections::HashMap, io::Write, rc::Rc};
 
 use env::Env;
 use reader::*;
@@ -35,7 +35,7 @@ impl Invoke for MalFn {
         }
         let_body.push(MalForm::List(bindings));
         let_body.push((*self.body).clone());
-        EVAL(MalForm::List(let_body), &mut default_env())
+        EVAL(MalForm::List(let_body), &mut self.env.clone())
     }
 }
 
@@ -97,6 +97,7 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
                     })
                     .collect::<Result<Vec<String>, MalErr>>()?;
                 Ok(MalForm::Fn(MalFn {
+                    env: Box::new(Env::with_outer(env)),
                     params,
                     body: Box::new(wrap_do(body)),
                 }))
@@ -131,8 +132,7 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
                 let [MalForm::List(bindings) | MalForm::Vector(bindings), body @ ..] = args else {
                     return Err("let form must have a seq as 2nd arg".to_owned());
                 };
-                let mut let_env = Env::new();
-                let_env.outer = Some(env);
+                let mut let_env = Env::with_outer(env);
                 for kv in bindings.chunks(2) {
                     let [k, v] = kv else {
                         panic!();
@@ -195,7 +195,7 @@ where
     )))
 }
 
-fn default_env() -> Env<'static> {
+fn default_env() -> Env {
     HashMap::from([
         (
             "+".to_string(),

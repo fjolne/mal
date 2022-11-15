@@ -1,18 +1,25 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 use crate::reader::MalForm;
 
-pub struct Env<'a> {
-    pub outer: Option<&'a Env<'a>>,
+#[derive(Clone)]
+pub struct Env {
+    pub outer: Option<Rc<Env>>,
     data: HashMap<String, MalForm>,
 }
 
-impl<'a> Env<'a> {
+impl Env {
     pub fn new() -> Self {
         Env {
             outer: None,
             data: HashMap::new(),
         }
+    }
+
+    pub fn with_outer(outer: &Env) -> Self {
+        let mut env = Env::new();
+        env.outer = Some(Rc::new(outer.to_owned()));
+        env
     }
 
     pub fn set(&mut self, k: &str, v: MalForm) -> &MalForm {
@@ -39,7 +46,7 @@ impl<'a> Env<'a> {
     }
 }
 
-impl<'a> From<HashMap<String, MalForm>> for Env<'a> {
+impl From<HashMap<String, MalForm>> for Env {
     fn from(data: HashMap<String, MalForm>) -> Self {
         Env { outer: None, data }
     }

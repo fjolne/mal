@@ -46,7 +46,7 @@ pub trait Invoke {
 
 #[derive(Clone)]
 pub struct MalFn {
-    // pub env: Box<Env<'a>>,
+    pub env: Box<Env>,
     pub params: Vec<String>,
     pub body: Box<MalForm>,
 }
