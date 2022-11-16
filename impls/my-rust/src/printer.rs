@@ -30,8 +30,8 @@ pub fn pr_str(form: &MalForm) -> String {
         MalForm::Nil => String::from("nil"),
         MalForm::Symbol(s) => s.clone(),
         MalForm::String(s) => pr_string(s),
-        MalForm::Fn(_) => "<fn>".into(),
-        MalForm::FnSpecial(_) => "<fn_special>".into(),
+        MalForm::Fn(_) => "#<function>".into(),
+        MalForm::FnSpecial(_) => "#<builtin function>".into(),
     }
 }
 

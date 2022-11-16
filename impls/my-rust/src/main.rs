@@ -6,39 +6,6 @@ use std::{collections::HashMap, io::Write, rc::Rc};
 use env::Env;
 use reader::*;
 
-fn eval_ast(form: &MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
-    let mut eval_seq = |v: &Vec<MalForm>| -> Result<Vec<MalForm>, MalErr> {
-        v.iter()
-            .map(|form| EVAL(form.clone(), env))
-            .collect::<Result<Vec<MalForm>, MalErr>>()
-    };
-    match form {
-        MalForm::Symbol(s) => env.get(s).cloned().ok_or(format!("symbol '{s}' not found")),
-        MalForm::List(v) => Ok(MalForm::List(eval_seq(v)?)),
-        MalForm::Vector(v) => Ok(MalForm::Vector(eval_seq(v)?)),
-        MalForm::Map(m) => Ok(MalForm::Map(
-            m.iter()
-                .map(|(k, v)| Ok((k.clone(), EVAL(v.clone(), env)?)))
-                .collect::<Result<HashMap<String, MalForm>, MalErr>>()?,
-        )),
-        _ => Ok(form.clone()),
-    }
-}
-
-impl Invoke for MalFn {
-    fn invoke(&self, args: Vec<MalForm>) -> Result<MalForm, MalErr> {
-        let mut let_body = vec![MalForm::Symbol("let*".to_owned())];
-        let mut bindings = vec![];
-        for (i, p) in self.params.iter().enumerate() {
-            bindings.push(MalForm::Symbol(p.clone()));
-            bindings.push(args[i].clone());
-        }
-        let_body.push(MalForm::List(bindings));
-        let_body.push((*self.body).clone());
-        EVAL(MalForm::List(let_body), &mut self.env.clone())
-    }
-}
-
 fn rep(input: String, env: &mut Env) -> Result<String, MalErr> {
     PRINT(EVAL(READ(input)?, env)?)
 }
@@ -106,8 +73,9 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
                 let [cond_expr, true_statement, false_statements @ ..] = args else {
                     return Err("'if' should have at least 2 args".to_owned());
                 };
-                let MalForm::Bool(cond_expr) = EVAL(cond_expr.clone(), env)? else {
-                    return Err("'if' cond_expr should evaluate to bool".to_owned());
+                let cond_expr = match EVAL(cond_expr.clone(), env)? {
+                    MalForm::Bool(false) | MalForm::Nil => false,
+                    _ => true,
                 };
                 EVAL(
                     if cond_expr {
@@ -152,6 +120,25 @@ fn EVAL(form: MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
             _ => eval_default(form, env),
         },
         _ => eval_default(form, env),
+    }
+}
+
+fn eval_ast(form: &MalForm, env: &mut Env) -> Result<MalForm, MalErr> {
+    let mut eval_seq = |v: &Vec<MalForm>| -> Result<Vec<MalForm>, MalErr> {
+        v.iter()
+            .map(|form| EVAL(form.clone(), env))
+            .collect::<Result<Vec<MalForm>, MalErr>>()
+    };
+    match form {
+        MalForm::Symbol(s) => env.get(s).cloned().ok_or(format!("symbol '{s}' not found")),
+        MalForm::List(v) => Ok(MalForm::List(eval_seq(v)?)),
+        MalForm::Vector(v) => Ok(MalForm::Vector(eval_seq(v)?)),
+        MalForm::Map(m) => Ok(MalForm::Map(
+            m.iter()
+                .map(|(k, v)| Ok((k.clone(), EVAL(v.clone(), env)?)))
+                .collect::<Result<HashMap<String, MalForm>, MalErr>>()?,
+        )),
+        _ => Ok(form.clone()),
     }
 }
 

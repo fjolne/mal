@@ -51,6 +51,25 @@ pub struct MalFn {
     pub body: Box<MalForm>,
 }
 
+impl Invoke for MalFn {
+    fn invoke(&self, args: Vec<MalForm>) -> Result<MalForm, MalErr> {
+        let mut let_body = vec![MalForm::Symbol("let*".to_owned())];
+        let mut bindings = vec![];
+        for (i, p) in self.params.iter().enumerate() {
+            if p == "&" {
+                bindings.push(MalForm::Symbol(self.params[i + 1].clone()));
+                bindings.push(MalForm::Vector(args[i..].to_vec()));
+                break;
+            }
+            bindings.push(MalForm::Symbol(p.clone()));
+            bindings.push(args[i].clone());
+        }
+        let_body.push(MalForm::List(bindings));
+        let_body.push((*self.body).clone());
+        crate::EVAL(MalForm::List(let_body), &mut self.env.clone())
+    }
+}
+
 type MalFunction = dyn Fn(Vec<MalForm>) -> MalForm;
 
 #[derive(Clone)]
@@ -169,7 +188,7 @@ fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
     let c = t.chars().nth(0).unwrap();
     if Regex::new(r"^[+-]?\d+$").unwrap().is_match(t) {
         Ok(MalForm::Int(t.parse::<i64>().unwrap()))
-    } else if c.is_alphabetic() || "+-*/=".contains(c) {
+    } else if c.is_alphabetic() || "+-*/=&".contains(c) {
         Ok(match t {
             "nil" => MalForm::Nil,
             "true" => MalForm::Bool(true),
