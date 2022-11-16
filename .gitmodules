@@ -1,0 +1,3 @@
+[submodule "impls/my-rust"]
+	path = impls/my-rust
+	url = https://github.com/fjolne/mal-rust
