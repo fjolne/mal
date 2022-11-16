@@ -31,7 +31,32 @@ fn tokenize(text: String) -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-pub type MalErr = String;
+#[derive(PartialEq, Debug)]
+pub struct MalErr(String);
+
+impl std::fmt::Display for MalErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for MalErr {
+    fn from(s: &str) -> Self {
+        MalErr(s.to_owned())
+    }
+}
+
+impl From<String> for MalErr {
+    fn from(s: String) -> Self {
+        MalErr(s)
+    }
+}
+
+impl From<std::io::Error> for MalErr {
+    fn from(err: std::io::Error) -> Self {
+        MalErr(err.to_string())
+    }
+}
 
 pub fn read_str(text: String) -> Result<MalForm, MalErr> {
     read_form(&mut Reader {
@@ -141,7 +166,7 @@ impl PartialEq for MalForm {
 
 fn read_form(r: &mut Reader) -> Result<MalForm, MalErr> {
     if r.eof() {
-        Err(String::from("Unexpected end of input!"))
+        Err("Unexpected end of input!".into())
     } else if r.peek() == "(" {
         Ok(MalForm::List(read_list(r, ")")?))
     } else if r.peek() == "[" {
@@ -149,7 +174,7 @@ fn read_form(r: &mut Reader) -> Result<MalForm, MalErr> {
     } else if r.peek() == "{" {
         let xs = read_list(r, "}")?;
         if xs.len() % 2 != 0 {
-            return Err("odd number of map forms".to_string());
+            return Err("odd number of map forms".into());
         }
         let kvs: Result<HashMap<String, MalForm>, MalErr> = xs
             .chunks(2)
@@ -158,7 +183,7 @@ fn read_form(r: &mut Reader) -> Result<MalForm, MalErr> {
                 Ok((
                     match k {
                         MalForm::String(s) => s.clone(),
-                        _ => return Err("map key should be a string or a keyword".to_string()),
+                        _ => return Err("map key should be a string or a keyword".into()),
                     },
                     v.clone(),
                 ))
@@ -177,7 +202,7 @@ fn read_list(r: &mut Reader, end_token: &str) -> Result<Vec<MalForm>, MalErr> {
         v.push(read_form(r)?)
     }
     if r.eof() {
-        return Err(String::from("unbalanced"));
+        return Err("unbalanced".into());
     }
     r.next();
     Ok(v)
@@ -188,7 +213,7 @@ fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
     let c = t.chars().nth(0).unwrap();
     if Regex::new(r"^[+-]?\d+$").unwrap().is_match(t) {
         Ok(MalForm::Int(t.parse::<i64>().unwrap()))
-    } else if c.is_alphabetic() || "+-*/=&".contains(c) {
+    } else if c.is_alphabetic() || "+-*/=&<>".contains(c) {
         Ok(match t {
             "nil" => MalForm::Nil,
             "true" => MalForm::Bool(true),
@@ -199,16 +224,16 @@ fn read_atom(r: &mut Reader) -> Result<MalForm, MalErr> {
         if t.len() >= 2 && t.ends_with("\"") {
             Ok(MalForm::String(String::from(&t[1..t.len() - 1])))
         } else {
-            Err(String::from("unbalanced"))
+            Err("unbalanced".into())
         }
     } else if c == ':' {
         if t.len() > 1 {
             Ok(MalForm::String(new_keyword(&t[1..])))
         } else {
-            Err(String::from("keyword cannot be empty"))
+            Err("keyword cannot be empty".into())
         }
     } else {
-        Err(format!("unknown token: {t}"))
+        Err(format!("unknown token: {t}").into())
     }
 }
 

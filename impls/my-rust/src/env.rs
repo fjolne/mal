@@ -51,3 +51,12 @@ impl From<HashMap<String, MalForm>> for Env {
         Env { outer: None, data }
     }
 }
+
+impl From<&HashMap<String, MalForm>> for Env {
+    fn from(data: &HashMap<String, MalForm>) -> Self {
+        Env {
+            outer: None,
+            data: data.to_owned(),
+        }
+    }
+}
